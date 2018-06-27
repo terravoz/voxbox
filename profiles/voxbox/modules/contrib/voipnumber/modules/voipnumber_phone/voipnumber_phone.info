@@ -1,0 +1,7 @@
+; $Id$
+name = VoIP Number Phone
+description = Provides VoIP Numbers from Phone module.
+dependencies[] = voipnumber
+dependencies[] = phone
+package = VoIP Drupal
+core = 6.x

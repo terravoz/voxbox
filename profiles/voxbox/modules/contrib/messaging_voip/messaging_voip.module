@@ -1,0 +1,332 @@
+<?php
+/**
+ * @file
+ *   Voip using Voip Drupal platform. Messaging method plug-in
+ */
+
+/**
+ * Implements hook_voipscript_get_script_names().
+ */
+function messaging_voip_voipscript_get_script_names() {
+  return array(
+    'messaging_voip_script_message_send',
+    'messaging_voip_script_store_croncall',
+    'messaging_voip_script_store_count',
+    'messaging_voip_script_store_index',
+    'messaging_voip_script_store_read',
+    'messaging_voip_script_store_incoming',
+    'messaging_voip_script_message_delete',
+  );
+}
+
+/**
+ * Implements hook_voipscript_load_script().
+ */
+function messaging_voip_voipscript_load_script($script_name, $params = NULL) {
+  if (! in_array($script_name, messaging_voip_voipscript_get_script_names())) {
+    return;
+  }
+
+  module_load_include('inc', 'messaging_voip', 'messaging_voip.script');
+  switch ($script_name) {
+    case 'messaging_voip_script_message_send':
+      return messaging_voip_script_message_send($params['message']);
+    case 'messaging_voip_script_croncall':
+      return messaging_voip_script_croncall($params['account'], $params['options']);
+    case 'messaging_voip_script_store_count':
+      if (empty($params['uid'])) {
+        return messaging_voip_script_store_count();
+      }
+      else {
+        return messaging_voip_script_store_count($params['uid']);
+      }
+    case 'messaging_voip_script_store_index':
+      return messaging_voip_script_store_index($params['options']);
+    case 'messaging_voip_script_store_incoming':
+      // @todo what params we got?
+      return messaging_voip_script_store_incoming($params);
+    case 'messaging_voip_script_message_delete':
+      $args = json_decode($params['args']);
+      if (empty($params['say'])) {
+        return messaging_voip_script_message_delete($args);
+      }
+      else {
+        return messaging_voip_script_message_delete($args, $params['say']);
+      }
+
+  }
+}
+
+/**
+ * Implements hook_theme().
+ *
+ * @todo this was an idea, but move to scripts that
+ *   can be chosen with variables.
+ */
+function messaging_voip_theme() {
+  return array(
+    'messaging_voip_message_send_intro' => array(
+      'arguments' => array('account' => NULL),
+      // Language argument.
+      'file' => 'messaging.script.inc',
+    ),
+    'messaging_voip_message_send_end' => array(
+      'arguments' => array(),
+      // Language argument.
+      'file' => 'messaging.script.inc',
+    ),
+    'messaging_voip_store_index' => array(
+      'arguments' => array('count' => NULL, 'messages' => NULL),
+      'file' => 'messaging.script.inc',
+    ),
+    'messaging_voip_store_nomessages' => array(
+      'arguments' => array(),
+      // Language argument.
+      'file' => 'messaging.script.inc',
+    ),
+  );
+}
+
+/**
+ * Implements of hook_form_alter().
+ *
+ * Add option to admin messaging settings:
+ *   default send method for phone call informing that there\'s a message.
+ */
+function messaging_voip_form_alter(&$form, $form_state, $form_id) {
+  if ($form_id == 'messaging_admin_settings') {
+    $methods = messaging_method_list();
+    // @todo We could set call time / interval here. @see messaging_voip_user
+  }
+}
+
+/** 
+ * Implements of hook_user().
+ *
+ * Adds option to user profile messaging settings:
+ *   default send method for phone call informing that there\'s a message.
+ */
+function messaging_voip_user($type, $edit, &$user, $category = NULL) {
+  switch ($type) {
+    case 'form':
+      if ($category == 'account' && ($list = messaging_method_list($user))) {
+        // @todo we could set call time / interval here.
+      }
+      break;
+  }
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function messaging_voip_views_api() {
+  return array(
+    'api' => '2',
+  );
+}
+
+/**
+ * Implements of hook_messaging().
+ */
+function messaging_voip_messaging($op = 'info') {
+  switch ($op) {
+    case 'send methods':
+      $info['voip_send'] = array(
+        'title' => 'Phone call that reads the message text',
+        'name' => t('Phone call that reads the message text'),
+        'group' => 'voip',
+          // Class of send method.
+        'type' => MESSAGING_TYPE_SEND,
+        'glue' => ' ',
+        'description' => t('Phone call that reads the message text.'),
+        'render callback' => 'messaging_voip_render_message',
+        'send callback' => 'messaging_voip_send',
+        'destination callback' => 'messaging_voip_user_destination',
+      );
+      // Using pull messaging to combine the messages into one phone call
+      // that the user can control.
+      $info['voip_store'] = array(
+        'title' => 'Phone',
+        'name' => t('Phone call'),
+        'group' => 'voip',
+        'type' => MESSAGING_TYPE_PULL,
+        'glue' => ' ',
+        'description' => t('Messages can be collected by calling up, or choosing to be called.'),
+        'render callback' => 'messaging_voip_render_message',
+        'send callback' => 'messaging_voip_store_put',
+        'destination' => 'uid',
+      );
+      $info['voip_sms'] = array(
+        'title' => 'Drupal VoIP SMS',
+        'name' => t('SMS'),
+        'group' => 'voip',
+        'type' => MESSAGING_TYPE_SEND,
+        'glue' => ' ',
+        'description' => t('Send SMS using Drupal VoIP.'),
+        'render callback' => 'messaging_voip_render_sms',
+        'send callback' => 'messaging_voip_send_sms',
+        'destination callback' => 'messaging_voip_user_destination',
+      );
+ 
+      return $info;
+  }
+} 
+
+/**
+ * Implements of hook_disable().
+ */
+function messaging_voip_disable() {
+  messaging_method_disable('voip_send');
+  messaging_method_disable('voip_store');
+}
+
+/**
+ * Just store messages to be read out later.
+ *
+ * Pull method: only called in testing.
+ */
+function messaging_voip_store_put($destination, &$message) {
+  dsm('messaging_voip_store_put called');
+  $message = messaging_store('save', $message);
+  return TRUE;
+}
+
+/**
+ * Message Render callback for voip_message.
+ */
+function messaging_voip_render_message($message, $info) {
+  // We need to apply filtering first or run through the render function.
+  $message = messaging_message_render($message, $info);
+  // Now we do some clean up in the body that may contain new lines,
+  // replace them with spaces.
+  if ($message->body) {
+    $message->body = messaging_text_clean($message->body, ' ');
+  }
+  return $message;
+}
+
+/**
+ * Messaging render callback: for SMS.
+ */
+function messaging_voip_render_sms($message, $info) {
+  $message = messaging_message_render($message, $info);
+  if ($message->body) {
+    $message->body = messaging_text_clean($message->body, ' ');
+  }
+  return $message;
+}
+
+/**
+ * Map user account to phone number destination.
+ */
+function messaging_voip_user_destination($account, $message) {
+  // Check for active mobile infomation. Simply return it so that the send
+  // callback has a destination array and access everything.
+  $phone = VoipUserNumber::getDefaultNumberFromUid($account->uid);
+  if (!empty($phone)) {
+    return $phone->getNumber();
+  }
+}
+
+/**
+ * Collect stored messages.
+ *
+ * @see message_store_get
+ *
+ * @param object $account
+ *   User object to collect messages for.
+ */
+function messaging_voip_store_get($account) {
+  // Caching for the case where a count is done before reading the
+  // index/messages.
+  static $messages = NULL;
+  if ($messages == NULL) {
+    $messages = messaging_store('get', array('method' => 'voip_store', 'uid' => $account->uid, array('mqid DESC')));
+  }
+
+  return $messages;
+}
+
+/**
+ * Messaging send callback: Sends a message using the active VoIP server.
+ *
+ * @param string $number
+ *   The destination phone number.
+ * @param string $message // @Todo NOT IT'S NOT. IT'S AN OBJECT.
+ *   The text of the messsage to send.
+ * @param array $options
+ *   An keyed array of additional properties as defined by gateway modules.
+ */
+function messaging_voip_send($number, $message, $options = array()) {
+  // Load script.
+  $script = VoipScript::loadScript('messaging_voip_script_message_send', array('message' => messaging_text_build($message, ' ')));
+
+  // Create a call.
+  $call = new VoipCall();
+  $call->setDestNumber($number);
+
+  $call->setCallerName('Drupal Messaging Voip');
+  $call->setScript($script);
+  $call->save();
+
+  // Dial the call.
+  voip_dial($call);
+  return TRUE;
+}
+
+/**
+ * Messaging send callback: Send SMS via VoIP Drupal.
+ */
+function messaging_voip_send_sms($number, $details, $options = array()) {
+  $message = $details->subject . ' ' . $details->body;
+  $uid = $details->account->uid;
+
+  global $user;
+  $saved_user = $user;
+  $user = $details->account;
+  watchdog('messaging_voip', 'Logging in user %user', array('%user' => $user->name));
+
+  $call = new VoipCall();
+  $call->setCurrentChannel('text');
+  $call->setCurrentNetwork('sms');
+  $call->setDestNumber($number);
+  $call->setUid($uid);
+  $call->setCallerNumber(variable_get('voipcall_cid_number', NULL));
+  $message = substr($message, 0, 160);
+  watchdog('DEBUG', 'voip_text( ' . $message . ' , ' . print_r($call, true) . ')');
+  voip_text($message, $call);
+
+  $user = $saved_user;
+  watchdog('messaging_voip', 'Reverting to user %user', array('%user' => $user->name));
+  return TRUE;
+}
+
+/**
+ * Callback for timed outgoing call.
+ *
+ * @todo confirm - this was undocumented.
+ */
+function messaging_voip_croncall($account) {
+  // Get number to call.
+  $phone = VoipNumber::getDefaultNumberFromUid($account->uid);
+  // @todo this is now VoipUserNumber.
+  if (empty($phone)) {
+    return FALSE;
+  }
+  $number = $phone->getNumber();
+
+  // Load script.
+  $script = VoipScript::loadScript('messaging_voip_script_croncall', array('account' => $account));
+
+  // Create a call.
+  $call = new VoipCall();
+  $call->setDestNumber($number);
+
+  $call->setCallerName('Drupal Messaging Voip');
+  $call->setScript($script);
+  $call->save();
+
+  // Dial the call.
+  voip_dial($call);
+  return TRUE;
+}

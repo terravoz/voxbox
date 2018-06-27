@@ -1,0 +1,53 @@
+<?php
+
+/**
+ * @file
+ *   Install file for VoIP Messaging.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function messaging_voip_install() {
+  messaging_voip_install_templates();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function messaging_voip_uninstall() {
+  messaging_voip_uninstall_templates();
+}
+
+/**
+ * Install helper function.
+ *
+ * Adds (empty) templates used by messaging.
+ */
+function messaging_voip_install_templates() {
+  // Clean up.
+  messaging_voip_uninstall_templates();
+  // Insert templates.
+  db_query("INSERT INTO {messaging_message_parts} (type,method,msgkey,message) VALUES('notifications-event','voip_message','footer','<none>')");
+  db_query("INSERT INTO {messaging_message_parts} (type,method,msgkey,message) VALUES('notifications-event','voip_inform','footer','<none>')");
+  db_query("INSERT INTO {messaging_message_parts} (type,method,msgkey,message) VALUES('notifications-digest','voip_message','footer','<none>')");
+  db_query("INSERT INTO {messaging_message_parts} (type,method,msgkey,message) VALUES('notifications-digest','voip_inform','footer','<none>')");
+}
+
+/**
+ * Uninstall helper function.
+ *
+ * Removes templates created @see messaging_voip_install_templates().
+ */
+function messaging_voip_uninstall_templates() {
+  if (db_table_exists('messaging_message_parts')) {
+    db_query("DELETE FROM {messaging_message_parts} WHERE method IN('voip_message','voip_inform')");
+  }
+}
+
+/**
+ * Upgrade: Theme function is added, flush caches.
+ */
+function messaging_voip_update_6000() {
+  return array();
+}
